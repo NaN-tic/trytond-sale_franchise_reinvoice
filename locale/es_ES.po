@@ -1,0 +1,23 @@
+#
+msgid ""
+msgstr "Content-Type: text/plain; charset=utf-8\n"
+
+msgctxt "field:account.invoice,reinvoice_invoices:"
+msgid "Reinvoice Invoices"
+msgstr "Facturas refacturación"
+
+msgctxt "field:account.invoice.line,franchise:"
+msgid "Franchise"
+msgstr "Franquicia"
+
+msgctxt "field:account.invoice.line,reinvoice_date:"
+msgid "Reinvoice Date"
+msgstr "Fecha refacturación"
+
+msgctxt "field:analytic_account.account,franchise:"
+msgid "Franchise"
+msgstr "Franquicia"
+
+msgctxt "view:account.invoice:"
+msgid "Create Franchise Invoices"
+msgstr "Crear facturas franquicia"
