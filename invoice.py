@@ -34,7 +34,7 @@ class Invoice:
         cls._buttons.update({
                 'create_franchise_reinvoices': {
                     'invisible': (~Eval('state').in_(['posted', 'paid']) |
-                        Eval('type').in_(['out_invoice', 'out_credit_note'])),
+                        Eval('type') == 'out'),
                     },
                 })
 
@@ -42,7 +42,7 @@ class Invoice:
         return [i.id for i in self.search([
                     ('lines.origin.invoice.id', '=', self.id,
                         'account.invoice.line'),
-                    ('type', '=', self.type.replace('in_', 'out_')),
+                    ('type', '=', 'out'),
                     ])]
 
     @classmethod
@@ -58,7 +58,7 @@ class Invoice:
         for invoice in invoices:
             if invoice.reinvoice_invoices:
                 continue
-            if invoice.type[:2] != 'in':
+            if invoice.type != 'in':
                 continue
             for line in invoice.lines:
                 reinvoice_line = line.get_reinvoice_line()
@@ -95,7 +95,7 @@ class InvoiceLine:
             # TODO: Uncomment on version > 3.6 as on_change is not working
             #'invisible': ~Bool(Eval('franchise')),
             'invisible': Eval('_parent_invoice', {}).get('type',
-                Eval('invoice_type')).in_(['out_invoice', 'out_credit_note'])
+                Eval('invoice_type')) == 'out'
             },
         depends=['franchise'])
 
@@ -126,10 +126,8 @@ class InvoiceLine:
         Journal = pool.get('account.journal')
         if not self.franchise or not self.reinvoice_date:
             return
-        type = self.invoice.type.replace('in_', 'out_')
         journals = Journal.search([
-                ('type', '=', _TYPE2JOURNAL.get(type or 'out_invoice',
-                        'revenue')),
+                ('type', '=', _TYPE2JOURNAL.get('out', 'revenue')),
                 ], limit=1)
         journal = None
         if journals:
@@ -151,7 +149,7 @@ class InvoiceLine:
         if not self.franchise or not self.reinvoice_date or not self.product:
             return
         invoice_line = self.__class__()
-        invoice_line.invoice_type = self.invoice.type.replace('in_', 'out_')
+        invoice_line.invoice_type = 'out'
         invoice_line.party = self.franchise.company_party
         invoice_line.description = self.description
         invoice_line.quantity = self.quantity

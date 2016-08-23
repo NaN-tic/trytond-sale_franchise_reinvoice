@@ -202,7 +202,7 @@ Create invoice::
     >>> AnalyticSelection = Model.get('analytic_account.account.selection')
     >>> Invoice = Model.get('account.invoice')
     >>> invoice = Invoice()
-    >>> invoice.type = 'in_invoice'
+    >>> invoice.type = 'in'
     >>> invoice.party = party
     >>> invoice.payment_term = payment_term
     >>> invoice.invoice_date = today
@@ -225,7 +225,7 @@ A new invoice have been created for the sale franchise::
     >>> franchise_invoice, = Invoice.find([
     ...     ('party', '=', franchise_party.id)])
     >>> franchise_invoice.type
-    u'out_invoice'
+    u'out'
     >>> franchise_invoice.invoice_date == tomorrow
     True
     >>> franchise_invoice.description
