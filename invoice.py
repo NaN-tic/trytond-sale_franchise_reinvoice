@@ -1,11 +1,9 @@
 # The COPYRIGHT file at the top level of this repository contains the full
 # copyright notices and license terms.
-from collections import defaultdict
 from trytond.model import ModelView, ModelSQL, fields
-from trytond.pyson import Eval, Bool
+from trytond.pyson import Equal, Eval, Bool
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
-from trytond.modules.account_invoice.invoice import _TYPE2JOURNAL
 
 __all__ = ['Account', 'Invoice', 'InvoiceLine']
 __metaclass__ = PoolMeta
@@ -34,7 +32,7 @@ class Invoice:
         cls._buttons.update({
                 'create_franchise_reinvoices': {
                     'invisible': (~Eval('state').in_(['posted', 'paid']) |
-                        Eval('type') == 'out'),
+                        Equal(Eval('type'), 'out')),
                     },
                 })
 
@@ -49,40 +47,54 @@ class Invoice:
     def post(cls, invoices):
         super(Invoice, cls).post(invoices)
         if Transaction().context.get('reinvoice', True):
-            cls.create_franchise_reinvoices(invoices)
+            with Transaction().set_user(0):
+                cls.create_franchise_reinvoices(invoices)
 
     @classmethod
     @ModelView.button
     def create_franchise_reinvoices(cls, invoices):
-        reinvoices = defaultdict(list)
+        pool = Pool()
+        Journal = pool.get('account.journal')
+        Entry = pool.get('analytic.account.entry')
+        reinvoices = []
         for invoice in invoices:
             if invoice.reinvoice_invoices:
                 continue
             if invoice.type != 'in':
                 continue
-            for line in invoice.lines:
-                reinvoice_line = line.get_reinvoice_line()
-                if reinvoice_line:
-                    reinvoices[line.reinvoice_key].append(reinvoice_line)
-        to_create = []
-        for key, lines in reinvoices.iteritems():
-            invoice = cls._get_franchise_invoice(key)
-            invoice.lines = (list(getattr(invoice, 'lines', [])) + lines)
-            to_create.append(invoice._save_values)
-        with Transaction().set_context(reinvoice=False):
-            cls.post(cls.create(to_create))
+            if not invoice.lines:
+                continue
+            journal, = Journal.search([
+                    ('type', '=', 'revenue'),
+                    ], limit=1)
 
-    @classmethod
-    def _get_franchise_invoice(cls, key):
-        values = dict(key)
-        invoice = cls(**values)
-        if 'invoice' in values:
-            invoice.reference = values['invoice'].number
-            invoice.description = values['invoice'].description
-        if invoice.party:
-            for key, value in invoice.on_change_party().iteritems():
-                setattr(invoice, key, value)
-        return invoice
+            reinvoice = cls()
+            reinvoice.company = invoice.company
+            reinvoice.journal = invoice.journal
+            reinvoice.currency = invoice.company.currency
+            reinvoice.payment_term = invoice.payment_term
+            reinvoice.type = 'out'
+            reinvoice.account = invoice.account
+            reinvoice.reference = invoice.number
+            reinvoice.description = invoice.description
+            reinvoice.invoice_date = [l.reinvoice_date
+                for l in invoice.lines
+                if l.reinvoice_date][0]
+            reinvoice.party = [l.franchise.company_party
+                for l in invoice.lines
+                if l.franchise and l.franchise.company_party][0]
+            reinvoice.on_change_party()
+
+            reinvoice_lines = []
+            for line in invoice.lines:
+                reinvoice_lines.append(line.get_reinvoice_line())
+            if reinvoice_lines:
+                reinvoice.lines = reinvoice_lines
+                reinvoices.append(reinvoice)
+        cls.save(reinvoices)
+
+        with Transaction().set_context(reinvoice=False):
+            cls.post(reinvoices)
 
 
 class InvoiceLine:
@@ -93,7 +105,7 @@ class InvoiceLine:
     reinvoice_date = fields.Date('Reinvoice Date',
         states={
             # TODO: Uncomment on version > 3.6 as on_change is not working
-            #'invisible': ~Bool(Eval('franchise')),
+            # 'invisible': ~Bool(Eval('franchise')),
             'invisible': Eval('_parent_invoice', {}).get('type',
                 Eval('invoice_type')) == 'out'
             },
@@ -104,7 +116,8 @@ class InvoiceLine:
         super(InvoiceLine, cls).__setup__()
         if 'reinvoice_date' not in cls.product.depends:
             # TODO: Uncomment on version > 3.6 as on_change is not working
-            required = Bool(Eval('reinvoice_date')) #  & Bool(Eval('franchise'))
+            required = Bool(Eval('reinvoice_date'))
+            #  & Bool(Eval('franchise'))
             old_required = cls.product.states.get('required')
             if old_required:
                 required |= old_required
@@ -116,55 +129,44 @@ class InvoiceLine:
     def on_change_with_franchise(self, name=None):
         if not self.analytic_accounts:
             return None
-        for account in self.analytic_accounts.accounts:
-            if account.franchise:
-                return account.franchise.id
 
-    @property
-    def reinvoice_key(self):
-        pool = Pool()
-        Journal = pool.get('account.journal')
-        if not self.franchise or not self.reinvoice_date:
-            return
-        journals = Journal.search([
-                ('type', '=', _TYPE2JOURNAL.get('out', 'revenue')),
-                ], limit=1)
-        journal = None
-        if journals:
-            journal, = journals
-        return (
-            ('company', self.invoice.company),
-            ('currency', self.invoice.company.currency),
-            ('party', self.franchise.company_party),
-            ('invoice_date', self.reinvoice_date),
-            ('invoice', self.invoice),
-            ('payment_term', self.invoice.payment_term),
-            ('type', type),
-            ('journal', journal),
-            )
+        for account in self.analytic_accounts:
+            if getattr(account, 'account', False) and (
+                    account.account.franchise):
+                return account.account.franchise.id
 
     def get_reinvoice_line(self):
-        pool = Pool()
-        Selection = pool.get('analytic_account.account.selection')
+        Entry = Pool().get('analytic.account.entry')
+
         if not self.franchise or not self.reinvoice_date or not self.product:
             return
-        invoice_line = self.__class__()
-        invoice_line.invoice_type = 'out'
-        invoice_line.party = self.franchise.company_party
-        invoice_line.description = self.description
-        invoice_line.quantity = self.quantity
-        invoice_line.product = self.product
-        invoice_line.origin = self
-        for key, value in invoice_line.on_change_product().iteritems():
-            setattr(invoice_line, key, value)
-        invoice_line.unit_price = self.unit_price
+
+        reinvoice_line = self.__class__()
+        reinvoice_line.invoice_type = 'out'
+        reinvoice_line.account = self.product.template.account_revenue
+        reinvoice_line.party = self.franchise.company_party
+        reinvoice_line.description = self.description
+        reinvoice_line.quantity = self.quantity
+        reinvoice_line.type = self.type
+        reinvoice_line.origin = self
+        reinvoice_line.company = self.company
+        reinvoice_line.unit_price = self.unit_price
+        reinvoice_line.product = self.product
+        reinvoice_line.on_change_product()
+
         # Compatibility with account_invoice discount module
         if hasattr(self, 'gross_unit_price'):
-            invoice_line.gross_unit_price = self.gross_unit_price
-            invoice_line.discount = self.discount
-        selection, = Selection.copy([self.analytic_accounts])
-        invoice_line.analytic_accounts = selection
-        return invoice_line
+            reinvoice_line.gross_unit_price = self.gross_unit_price
+            reinvoice_line.discount = self.discount
+
+        default = {
+            'origin': None,
+            }
+        analytic_accounts = Entry.copy(list(self.analytic_accounts),
+            default=default)
+        reinvoice_line.analytic_accounts = analytic_accounts
+
+        return reinvoice_line
 
     def _credit(self):
         line = super(InvoiceLine, self)._credit()
