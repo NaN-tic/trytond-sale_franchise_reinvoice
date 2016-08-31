@@ -8,6 +8,12 @@ Imports::
     >>> from decimal import Decimal
     >>> from operator import attrgetter
     >>> from proteus import config, Model, Wizard
+    >>> from trytond.modules.company.tests.tools import create_company, \
+    ...     get_company
+    >>> from trytond.modules.account.tests.tools import create_fiscalyear, \
+    ...     create_chart, get_accounts, create_tax, set_tax_code
+    >>> from trytond.modules.account_invoice.tests.tools import \
+    ...     set_fiscalyear_invoice_sequences, create_payment_term
     >>> today = datetime.date.today()
     >>> tomorrow = today + relativedelta(days=1)
 
@@ -16,39 +22,33 @@ Create database::
     >>> config = config.set_trytond()
     >>> config.pool.test = True
 
-Install account_invoice::
+Install sale_franchise_reinvoice::
 
-    >>> Module = Model.get('ir.module.module')
+    >>> Module = Model.get('ir.module')
     >>> module, = Module.find(
     ...     [('name', '=', 'sale_franchise_reinvoice')])
     >>> module.click('install')
-    >>> Wizard('ir.module.module.install_upgrade').execute('upgrade')
+    >>> Wizard('ir.module.install_upgrade').execute('upgrade')
 
 Create company::
 
-    >>> Currency = Model.get('currency.currency')
-    >>> CurrencyRate = Model.get('currency.currency.rate')
-    >>> currencies = Currency.find([('code', '=', 'USD')])
-    >>> if not currencies:
-    ...     currency = Currency(name='US Dollar', symbol=u'$', code='USD',
-    ...         rounding=Decimal('0.01'), mon_grouping='[]',
-    ...         mon_decimal_point='.')
-    ...     currency.save()
-    ...     CurrencyRate(date=today + relativedelta(month=1, day=1),
-    ...         rate=Decimal('1.0'), currency=currency).save()
-    ... else:
-    ...     currency, = currencies
-    >>> Company = Model.get('company.company')
-    >>> Party = Model.get('party.party')
-    >>> company_config = Wizard('company.company.config')
-    >>> company_config.execute('company')
-    >>> company = company_config.form
-    >>> party = Party(name='Dunder Mifflin')
-    >>> party.save()
-    >>> company.party = party
-    >>> company.currency = currency
-    >>> company_config.execute('add')
-    >>> company, = Company.find([])
+    >>> _ = create_company()
+    >>> company = get_company()
+
+Create account user::
+
+    >>> User = Model.get('res.user')
+    >>> Group = Model.get('res.group')
+    >>> account_user = User()
+    >>> account_user.name = 'Account'
+    >>> account_user.login = 'account'
+    >>> account_user.main_company = company
+    >>> account_group, = Group.find([('name', '=', 'Account Administration')])
+    >>> account_user.groups.append(account_group)
+    >>> account_user.save()
+    >>> account_group, = Group.find([('name', '=', 'Analytic Administration')])
+    >>> account_user.groups.append(account_group)
+    >>> account_user.save()
 
 Reload the context::
 
@@ -57,86 +57,31 @@ Reload the context::
 
 Create fiscal year::
 
-    >>> FiscalYear = Model.get('account.fiscalyear')
-    >>> Sequence = Model.get('ir.sequence')
-    >>> SequenceStrict = Model.get('ir.sequence.strict')
-    >>> fiscalyear = FiscalYear(name=str(today.year))
-    >>> fiscalyear.start_date = today + relativedelta(month=1, day=1)
-    >>> fiscalyear.end_date = today + relativedelta(month=12, day=31)
-    >>> fiscalyear.company = company
-    >>> post_move_seq = Sequence(name=str(today.year), code='account.move',
-    ...     company=company)
-    >>> post_move_seq.save()
-    >>> fiscalyear.post_move_sequence = post_move_seq
-    >>> invoice_seq = SequenceStrict(name=str(today.year),
-    ...     code='account.invoice', company=company)
-    >>> invoice_seq.save()
-    >>> fiscalyear.out_invoice_sequence = invoice_seq
-    >>> fiscalyear.in_invoice_sequence = invoice_seq
-    >>> fiscalyear.out_credit_note_sequence = invoice_seq
-    >>> fiscalyear.in_credit_note_sequence = invoice_seq
-    >>> fiscalyear.save()
-    >>> FiscalYear.create_period([fiscalyear.id], config.context)
+    >>> fiscalyear = set_fiscalyear_invoice_sequences(
+    ...     create_fiscalyear(company))
+    >>> fiscalyear.click('create_period')
+    >>> period = fiscalyear.periods[0]
 
 Create chart of accounts::
 
-    >>> AccountTemplate = Model.get('account.account.template')
-    >>> Account = Model.get('account.account')
-    >>> account_template, = AccountTemplate.find([('parent', '=', None)])
-    >>> create_chart = Wizard('account.create_chart')
-    >>> create_chart.execute('account')
-    >>> create_chart.form.account_template = account_template
-    >>> create_chart.form.company = company
-    >>> create_chart.execute('create_account')
-    >>> receivable, = Account.find([
-    ...         ('kind', '=', 'receivable'),
-    ...         ('company', '=', company.id),
-    ...         ])
-    >>> payable, = Account.find([
-    ...         ('kind', '=', 'payable'),
-    ...         ('company', '=', company.id),
-    ...         ])
-    >>> revenue, = Account.find([
-    ...         ('kind', '=', 'revenue'),
-    ...         ('company', '=', company.id),
-    ...         ])
-    >>> expense, = Account.find([
-    ...         ('kind', '=', 'expense'),
-    ...         ('company', '=', company.id),
-    ...         ])
-    >>> account_tax, = Account.find([
-    ...         ('kind', '=', 'other'),
-    ...         ('company', '=', company.id),
-    ...         ('name', '=', 'Main Tax'),
-    ...         ])
-    >>> create_chart.form.account_receivable = receivable
-    >>> create_chart.form.account_payable = payable
-    >>> create_chart.execute('create_properties')
+    >>> _ = create_chart(company)
+    >>> accounts = get_accounts(company)
+    >>> receivable = accounts['receivable']
+    >>> payable = accounts['payable']
+    >>> revenue = accounts['revenue']
+    >>> expense = accounts['expense']
+    >>> account_tax = accounts['tax']
+    >>> account_cash = accounts['cash']
 
 Create tax::
 
-    >>> TaxCode = Model.get('account.tax.code')
     >>> Tax = Model.get('account.tax')
-    >>> tax = Tax()
-    >>> tax.name = 'Tax'
-    >>> tax.description = 'Tax'
-    >>> tax.type = 'percentage'
-    >>> tax.rate = Decimal('.10')
-    >>> tax.invoice_account = account_tax
-    >>> tax.credit_note_account = account_tax
-    >>> invoice_base_code = TaxCode(name='invoice base')
-    >>> invoice_base_code.save()
-    >>> tax.invoice_base_code = invoice_base_code
-    >>> invoice_tax_code = TaxCode(name='invoice tax')
-    >>> invoice_tax_code.save()
-    >>> tax.invoice_tax_code = invoice_tax_code
-    >>> credit_note_base_code = TaxCode(name='credit note base')
-    >>> credit_note_base_code.save()
-    >>> tax.credit_note_base_code = credit_note_base_code
-    >>> credit_note_tax_code = TaxCode(name='credit note tax')
-    >>> credit_note_tax_code.save()
-    >>> tax.credit_note_tax_code = credit_note_tax_code
+    >>> tax = set_tax_code(create_tax(Decimal('.10')))
     >>> tax.save()
+    >>> invoice_base_code = tax.invoice_base_code
+    >>> invoice_tax_code = tax.invoice_tax_code
+    >>> credit_note_base_code = tax.credit_note_base_code
+    >>> credit_note_tax_code = tax.credit_note_tax_code
 
 Create party::
 
@@ -167,11 +112,7 @@ Create product::
 
 Create payment term::
 
-    >>> PaymentTerm = Model.get('account.invoice.payment_term')
-    >>> PaymentTermLine = Model.get('account.invoice.payment_term.line')
-    >>> payment_term = PaymentTerm(name='Term')
-    >>> payment_term_line = PaymentTermLine(type='remainder')
-    >>> payment_term.lines.append(payment_term_line)
+    >>> payment_term = create_payment_term()
     >>> payment_term.save()
 
 Create franchise::
@@ -199,7 +140,6 @@ Create analytic accounts::
 
 Create invoice::
 
-    >>> AnalyticSelection = Model.get('analytic_account.account.selection')
     >>> Invoice = Model.get('account.invoice')
     >>> invoice = Invoice()
     >>> invoice.type = 'in'
@@ -212,10 +152,11 @@ Create invoice::
     >>> line.description = 'Description'
     >>> line.reinvoice_date = tomorrow
     >>> line.quantity = 5
-    >>> analytic_selection = AnalyticSelection()
-    >>> analytic_selection.accounts.append(analytic_account)
-    >>> analytic_selection.save()
-    >>> line.analytic_accounts = analytic_selection
+    >>> line.unit_price = Decimal('40')
+    >>> entry, = line.analytic_accounts
+    >>> entry.account = analytic_account
+    >>> line.analytic_accounts[0].account == analytic_account
+    True
     >>> invoice.click('post')
     >>> invoice.number
     u'1'
@@ -237,16 +178,16 @@ A new invoice have been created for the sale franchise::
     True
     >>> franchise_line.account == revenue
     True
-    >>> franchise_line.analytic_accounts.accounts == [analytic_account]
+    >>> franchise_line.analytic_accounts[0].account == analytic_account
     True
     >>> franchise_line.unit_price
-    Decimal('20')
+    Decimal('40')
     >>> franchise_line.description
     u'Description'
     >>> franchise_invoice.untaxed_amount
-    Decimal('100.00')
+    Decimal('200.00')
     >>> franchise_invoice.total_amount
-    Decimal('110.00')
+    Decimal('220.00')
 
 
 Credit the supplier invoice and check reinvoice data is copied correctly::
