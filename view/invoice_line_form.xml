@@ -3,7 +3,7 @@
      copyright notices and license terms. -->
 <data>
     <xpath
-        expr="/form/notebook/page[@id='general']/field[@name='analytic_accounts']"
+        expr="/form/notebook/page[@id='analytic_accounts']/field[@name='analytic_accounts']"
             position="after">
         <label name="reinvoice_date"/>
         <field name="reinvoice_date"/>

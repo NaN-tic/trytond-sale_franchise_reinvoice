@@ -6,11 +6,11 @@ from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
 
 __all__ = ['Account', 'Invoice', 'InvoiceLine']
-__metaclass__ = PoolMeta
 
 
 class Account(ModelSQL, ModelView):
     __name__ = 'analytic_account.account'
+    __metaclass__ = PoolMeta
 
     franchise = fields.Many2One('sale.franchise', 'Franchise',
         states={
@@ -21,6 +21,7 @@ class Account(ModelSQL, ModelView):
 
 class Invoice:
     __name__ = 'account.invoice'
+    __metaclass__ = PoolMeta
 
     reinvoice_invoices = fields.Function(fields.One2Many('account.invoice',
             None, 'Reinvoice Invoices'),
@@ -99,6 +100,7 @@ class Invoice:
 
 class InvoiceLine:
     __name__ = 'account.invoice.line'
+    __metaclass__ = PoolMeta
 
     franchise = fields.Function(fields.Many2One('sale.franchise', 'Franchise'),
         'on_change_with_franchise')
@@ -171,5 +173,5 @@ class InvoiceLine:
     def _credit(self):
         line = super(InvoiceLine, self)._credit()
         if line and self.reinvoice_date:
-            line['reinvoice_date'] = self.reinvoice_date
+            line.reinvoice_date = self.reinvoice_date
         return line
