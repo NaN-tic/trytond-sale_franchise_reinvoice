@@ -4,6 +4,7 @@ from trytond.model import ModelView, ModelSQL, fields
 from trytond.pyson import Equal, Eval, Bool
 from trytond.pool import Pool, PoolMeta
 from trytond.transaction import Transaction
+from collections import defaultdict
 
 __all__ = ['Account', 'Invoice', 'InvoiceLine']
 
@@ -48,16 +49,33 @@ class Invoice:
     def post(cls, invoices):
         super(Invoice, cls).post(invoices)
         if Transaction().context.get('reinvoice', True):
-            with Transaction().set_user(0):
+            with Transaction().set_context(_check_access=False):
                 cls.create_franchise_reinvoices(invoices)
+
+
+    @classmethod
+    def _get_franchise_invoice(cls, invoice, franchise, reinvoice_date):
+        reinvoice = cls()
+        reinvoice.company = invoice.company
+        reinvoice.journal = invoice.journal
+        reinvoice.currency = invoice.company.currency
+        #reinvoice.payment_term = invoice.payment_term
+        reinvoice.type = 'out'
+        #reinvoice.account = invoice.account
+        reinvoice.reference = invoice.number
+        reinvoice.description = invoice.description
+        reinvoice.invoice_date = reinvoice_date
+        reinvoice.party = franchise.company_party
+        reinvoice.on_change_party()
+
+        return reinvoice
 
     @classmethod
     @ModelView.button
     def create_franchise_reinvoices(cls, invoices):
         pool = Pool()
-        Journal = pool.get('account.journal')
         Entry = pool.get('analytic.account.entry')
-        reinvoices = []
+        reinvoices = defaultdict(list)
         for invoice in invoices:
             if invoice.reinvoice_invoices:
                 continue
@@ -65,37 +83,27 @@ class Invoice:
                 continue
             if not invoice.lines:
                 continue
-            journal, = Journal.search([
-                    ('type', '=', 'revenue'),
-                    ], limit=1)
 
-            reinvoice = cls()
-            reinvoice.company = invoice.company
-            reinvoice.journal = invoice.journal
-            reinvoice.currency = invoice.company.currency
-            reinvoice.payment_term = invoice.payment_term
-            reinvoice.type = 'out'
-            reinvoice.account = invoice.account
-            reinvoice.reference = invoice.number
-            reinvoice.description = invoice.description
-            reinvoice.invoice_date = [l.reinvoice_date
-                for l in invoice.lines
-                if l.reinvoice_date][0]
-            reinvoice.party = [l.franchise.company_party
-                for l in invoice.lines
-                if l.franchise and l.franchise.company_party][0]
-            reinvoice.on_change_party()
-
-            reinvoice_lines = []
             for line in invoice.lines:
-                reinvoice_lines.append(line.get_reinvoice_line())
-            if reinvoice_lines:
-                reinvoice.lines = reinvoice_lines
-                reinvoices.append(reinvoice)
-        cls.save(reinvoices)
+                if not line.franchise or not line.reinvoice_date:
+                    continue
+                reinvoice_line = line.get_reinvoice_line()
+                if reinvoice_line:
+                    reinvoices[(invoice,line.franchise,
+                        line.reinvoice_date)].append(reinvoice_line)
+
+        to_save = []
+        for key, lines in reinvoices.items():
+            invoice,franchise,reinvoice_date = key
+            reinvoice = cls._get_franchise_invoice(invoice, franchise,
+                reinvoice_date)
+            reinvoice_lines = []
+            reinvoice.lines = lines
+            to_save.append(reinvoice)
+        cls.save(to_save)
 
         with Transaction().set_context(reinvoice=False):
-            cls.post(reinvoices)
+            cls.post(to_save)
 
 
 class InvoiceLine:
@@ -109,8 +117,11 @@ class InvoiceLine:
             # TODO: Uncomment on version > 3.6 as on_change is not working
             # 'invisible': ~Bool(Eval('franchise')),
             'invisible': Eval('_parent_invoice', {}).get('type',
-                Eval('invoice_type')) == 'out'
+                Eval('invoice_type')) == 'out',
+            'required':((Eval('_parent_invoice', {}).get('type',
+                Eval('invoice_type')) == 'in') & Bool(Eval('franchise')))
             },
+
         depends=['franchise'])
 
     @classmethod
@@ -145,7 +156,6 @@ class InvoiceLine:
 
         reinvoice_line = self.__class__()
         reinvoice_line.invoice_type = 'out'
-        reinvoice_line.account = self.product.template.account_revenue
         reinvoice_line.party = self.franchise.company_party
         reinvoice_line.description = self.description
         reinvoice_line.quantity = self.quantity
@@ -155,7 +165,6 @@ class InvoiceLine:
         reinvoice_line.unit_price = self.unit_price
         reinvoice_line.product = self.product
         reinvoice_line.on_change_product()
-
         # Compatibility with account_invoice discount module
         if hasattr(self, 'gross_unit_price'):
             reinvoice_line.gross_unit_price = self.gross_unit_price
