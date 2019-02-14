@@ -114,12 +114,8 @@ class InvoiceLine:
         'on_change_with_franchise')
     reinvoice_date = fields.Date('Reinvoice Date',
         states={
-            # TODO: Uncomment on version > 3.6 as on_change is not working
-            # 'invisible': ~Bool(Eval('franchise')),
             'invisible': Eval('_parent_invoice', {}).get('type',
                 Eval('invoice_type')) == 'out',
-            'required':((Eval('_parent_invoice', {}).get('type',
-                Eval('invoice_type')) == 'in') & Bool(Eval('franchise')))
             },
 
         depends=['franchise'])
