@@ -59,6 +59,7 @@ class Invoice:
         reinvoice.company = invoice.company
         reinvoice.journal = invoice.journal
         reinvoice.currency = invoice.company.currency
+        reinvoice.target_company = franchise.company
         #reinvoice.payment_term = invoice.payment_term
         reinvoice.type = 'out'
         #reinvoice.account = invoice.account
@@ -119,20 +120,6 @@ class InvoiceLine:
             },
 
         depends=['franchise'])
-
-    @classmethod
-    def __setup__(cls):
-        super(InvoiceLine, cls).__setup__()
-        if 'reinvoice_date' not in cls.product.depends:
-            # TODO: Uncomment on version > 3.6 as on_change is not working
-            required = Bool(Eval('reinvoice_date'))
-            #  & Bool(Eval('franchise'))
-            old_required = cls.product.states.get('required')
-            if old_required:
-                required |= old_required
-            cls.product.states['required'] = required
-            cls.product.depends.append('reinvoice_date')
-            #  cls.product.depends.append('franchise')
 
     @fields.depends('analytic_accounts')
     def on_change_with_franchise(self, name=None):
