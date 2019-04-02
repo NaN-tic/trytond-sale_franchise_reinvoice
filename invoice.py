@@ -9,9 +9,8 @@ from collections import defaultdict
 __all__ = ['Account', 'Invoice', 'InvoiceLine']
 
 
-class Account(ModelSQL, ModelView):
+class Account(metaclass=PoolMeta):
     __name__ = 'analytic_account.account'
-    __metaclass__ = PoolMeta
 
     franchise = fields.Many2One('sale.franchise', 'Franchise',
         states={
@@ -20,9 +19,8 @@ class Account(ModelSQL, ModelView):
         depends=['type'])
 
 
-class Invoice:
+class Invoice(metaclass=PoolMeta):
     __name__ = 'account.invoice'
-    __metaclass__ = PoolMeta
 
     reinvoice_invoices = fields.Function(fields.One2Many('account.invoice',
             None, 'Reinvoice Invoices'),
@@ -107,9 +105,9 @@ class Invoice:
             cls.post(to_save)
 
 
-class InvoiceLine:
+class InvoiceLine(metaclass=PoolMeta):
     __name__ = 'account.invoice.line'
-    __metaclass__ = PoolMeta
+
 
     franchise = fields.Function(fields.Many2One('sale.franchise', 'Franchise'),
         'on_change_with_franchise')
