@@ -77,6 +77,32 @@ Create party::
     >>> party = Party(name='Party')
     >>> party.save()
 
+Create payment method::
+
+    >>> Journal = Model.get('account.journal')
+    >>> PaymentMethod = Model.get('account.invoice.payment.method')
+    >>> Sequence = Model.get('ir.sequence')
+    >>> journal_cash, = Journal.find([('type', '=', 'cash')])
+    >>> payment_method = PaymentMethod()
+    >>> payment_method.name = 'Cash'
+    >>> payment_method.journal = journal_cash
+    >>> payment_method.credit_account = account_cash
+    >>> payment_method.debit_account = account_cash
+    >>> payment_method.save()
+
+Create account categories::
+
+    >>> ProductCategory = Model.get('product.category')
+    >>> account_category = ProductCategory(name="Account Category")
+    >>> account_category.accounting = True
+    >>> account_category.account_expense = expense
+    >>> account_category.account_revenue = revenue
+    >>> account_category.save()
+
+    >>> account_category_tax, = account_category.duplicate()
+    >>> account_category_tax.customer_taxes.append(tax)
+    >>> account_category_tax.save()
+
 Create product::
 
     >>> ProductUom = Model.get('product.uom')
@@ -87,13 +113,11 @@ Create product::
     >>> template = ProductTemplate()
     >>> template.name = 'product'
     >>> template.default_uom = unit
-    >>> template.type = 'service'
-    >>> template.list_price = Decimal('40')
-    >>> template.cost_price = Decimal('20')
-    >>> template.account_expense = expense
-    >>> template.account_revenue = revenue
-    >>> template.customer_taxes.append(tax)
-    >>> template.supplier_taxes.append(Tax(tax.id))
+    >>> template.type = 'goods'
+    >>> template.salable = True
+    >>> template.list_price = Decimal('10')
+    >>> template.cost_price_method = 'fixed'
+    >>> template.account_category = account_category_tax
     >>> template.save()
     >>> product.template = template
     >>> product.save()
@@ -147,20 +171,20 @@ Create invoice::
     True
     >>> invoice.click('post')
     >>> invoice.number
-    u'1'
+    '1'
 
 A new invoice have been created for the sale franchise::
 
     >>> franchise_invoice, = Invoice.find([
     ...     ('party', '=', franchise_party.id)])
     >>> franchise_invoice.type
-    u'out'
+    'out'
     >>> franchise_invoice.invoice_date == tomorrow
     True
     >>> franchise_invoice.description
-    u'SUPPLIER DESCRIPTION'
+    'SUPPLIER DESCRIPTION'
     >>> franchise_invoice.reference
-    u'1'
+    '1'
     >>> franchise_line, = franchise_invoice.lines
     >>> franchise_line.product == product
     True
@@ -171,7 +195,7 @@ A new invoice have been created for the sale franchise::
     >>> franchise_line.unit_price
     Decimal('40')
     >>> franchise_line.description
-    u'Description'
+    'Description'
     >>> franchise_invoice.untaxed_amount
     Decimal('200.00')
     >>> franchise_invoice.total_amount
